@@ -254,8 +254,8 @@ def run_mplayer(input, output, **options):
 
 def _main():
     with fifo_handle('video.y4m') as named_pipe:
-        with run_x264(named_pipe, 'ctest.mp4') as x264:
-            with run_mplayer('mf://color_test/*.png', named_pipe) as mplayer:
+        with run_x264(named_pipe, sys.argv[2]) as x264:
+            with run_mplayer(sys.argv[1], named_pipe) as mplayer:
                 mplayer_handler(mplayer.stdout)
                 x264_handler(x264.stdout)
                 asyncore.loop()
