@@ -205,7 +205,8 @@ class mplayer_handler(output_line_dispatcher):
         for format, pattern in self.format_desc.iteritems():
             match = pattern.search(line)
             if match is not None:
-                print format, match.groupdict()
+                #print format, match.groupdict()
+                pass
 
 
 def run_x264(input, output, **options):
@@ -226,7 +227,7 @@ def run_x264(input, output, **options):
 def run_mplayer(input, output, **options):
     for opt, val in [('vf', 'scale=:::0'), ('sound', False), ('benchmark', True),
                      ('quiet', False), ('lavdopts', 'skiploopfilter=none:threads=1'),
-                     ('consolecontrols', False), ('noconfig', 'all'), ('fontconfig', False),
+                     ('consolecontrols', False), ('noconfig', 'all'),
                      ('vo', 'yuv4mpeg:file="%s"' % output)]:
         options.setdefault(opt, val)
     # Decode jpgs with the ijpg codec, to force conversion to rgb,
@@ -251,8 +252,24 @@ def run_mplayer(input, output, **options):
     return run_process([which('mplayer'), input] + option_list, stderr=subprocess.STDOUT,
                        terminate_children=True)
 
+def encode(input, output, x264_options=None, mplayer_options=None):
+    if x264_options is None:
+        x264_options = {}
+    if mplayer_options is None:
+        mplayer_options = {}
+    with fifo_handle('video.y4m') as named_pipe:
+        with run_x264(named_pipe, output, **x264_options) as x264:
+            with run_mplayer(input, named_pipe, **mplayer_options) as mplayer:
+                mplayer_handler(mplayer.stdout)
+                x264_handler(x264.stdout)
+                asyncore.loop()
+
 
 def _main():
+    encode(sys.argv[1], sys.argv[2])
+    return
+
+
     with fifo_handle('video.y4m') as named_pipe:
         with run_x264(named_pipe, sys.argv[2]) as x264:
             with run_mplayer(sys.argv[1], named_pipe) as mplayer:
@@ -308,7 +325,6 @@ neroAacEnc -q 0.5 -if in.wav -of out.mp4
 First pass:  processed 31 seconds...
 Second pass: processed 31 seconds...
 
-"""
 
 def run_x264(input, output, options):
     executable = which('x264')
@@ -404,3 +420,5 @@ def process(fifo):
         fp.close()
         #out = os.path.join(input_dir + 'test2', name + '.jpg')
     #out_fp.close()
+
+ """
