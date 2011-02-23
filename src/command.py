@@ -28,13 +28,11 @@ def get_input(name):
             directory = os.path.dirname(links[0])
             extension = os.path.splitext(links[0])[1]
             yield 'mf://' + os.path.join(directory, '*' + extension)
-        #return list(sequence.iterate_sequence(name, seq[0], seq[1], sequences[seq]))
     else:
         yield name
 
 def _main():
     parser = optparse.OptionParser("usage: %prog [options] input output")
-    #parser.add_option('-o', dest='output', help='write to OUTPUT')
     options, args = parser.parse_args()
     if len(args) != 2:
         parser.error('one input and one output is required')
@@ -46,13 +44,7 @@ def _main():
         parser.error('output "%s" already exists' % output_name)
 
     for input in get_input(input_name):
-        #if isinstance(input, list):
-        #    directory = os.path.dirname(input[0])
-        #    extension = os.path.splitext(input[0])[1]
-        #    input = 'mf://' + os.path.join(directory, '*' + extension)
         asynproc.encode(input, output_name)
-        #print input
-    #print options, args
 
 
 if __name__=='__main__':

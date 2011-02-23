@@ -38,12 +38,6 @@ def separation(s, seps):
     i = min(indices)
     return s[:i], s[i], s[i+1:]
 
-    # seps = set(seps)
-    # for i, c in enumerate(s):
-    #     if c in seps:
-    #         return s[:i], c, s[i+1:]
-    # return s, '', ''
-
 
 def which(name):
     """
@@ -69,6 +63,7 @@ def which(name):
             return os.path.join(path, name)
     return name
 
+
 def process_tree():
     ps = subprocess.Popen([which('ps')] + '-o pid,ppid -ax'.split(),
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -83,6 +78,7 @@ def process_tree():
         except ValueError:
             pass
     return result
+
 
 @contextlib.contextmanager
 def fifo_handle(name):
@@ -99,6 +95,7 @@ def fifo_handle(name):
         for name in os.listdir(tmp_dir):
             os.unlink(os.path.join(tmp_dir, name))
         os.rmdir(tmp_dir)
+
 
 @contextlib.contextmanager
 def run_process(*args, **kwds):
@@ -190,7 +187,6 @@ class x264_handler(output_line_dispatcher):
                                     '.*[^0-9.](?P<bitrate>\d*\.?\d*) kb/s'),
         }
     def handle_line(self, line):
-        #print repr(line)
         for format, pattern in self.format_desc.iteritems():
             match = pattern.search(line)
             if match is not None:
@@ -201,7 +197,6 @@ class mplayer_handler(output_line_dispatcher):
         'status': re.compile(r'V:\s*(?P<time>\d*\.\d*).*[^0-9](?P<frame>\d+)/[^0-9]*(?P<nframes>\d+)[^0-9]'),
         }
     def handle_line(self, line):
-        #print repr(line)
         for format, pattern in self.format_desc.iteritems():
             match = pattern.search(line)
             if match is not None:
@@ -266,159 +261,12 @@ def encode(input, output, x264_options=None, mplayer_options=None):
 
 
 def _main():
+    import doctest
+    doctest.testmod()
     encode(sys.argv[1], sys.argv[2])
-    return
-
-
-    with fifo_handle('video.y4m') as named_pipe:
-        with run_x264(named_pipe, sys.argv[2]) as x264:
-            with run_mplayer(sys.argv[1], named_pipe) as mplayer:
-                mplayer_handler(mplayer.stdout)
-                x264_handler(x264.stdout)
-                asyncore.loop()
-
-
-    #import doctest
-    #doctest.testmod()
-    #return
-
     return
 
 if __name__=='__main__':
     _main()
     sys.exit(0)
 
-
-
-
-
-
-
-
-"""
-x264
- --crf 24
- --preset veryslow
- --threads auto
- --tune film
- --profile main --bframes 2 --ref 8 --partitions p8x8,b8x8,i4x4,p4x4
- --output temp.mp4
- fifo.y4m
-
- --keyint
- --min-keyint
-
-mplayer
- input
- -noautosub
- -ass -ass-color efba6b00 -ass-font-scale 0.5625
- -vf crop=x:y,scale=x:y::0
- -vo yuv4mpeg:file=fifo.y4m
- -nosound
- -benchmark
- -quiet
-
-afconvert -v input.wav -o output.mp4 --bitrate 448000 --file mp4f --data aac --channellayout MPEG_5_1_C -q 127
-
-neroAacEnc -br 448000 -2pass -if in.wav -of out.mp4
-neroAacEnc -q 0.5 -if in.wav -of out.mp4
-First pass:  processed 31 seconds...
-Second pass: processed 31 seconds...
-
-
-def run_x264(input, output, options):
-    executable = which('x264')
-    if not executable:
-        print >>sys.stderr, 'x264 not found'
-        return
-    yield 'enter', executable
-    with run_process([executable, '--output', output, input] + options) as process:
-        while process.poll() is None:
-            print process.stdout.read(1024)
-            yield 'running', nframes
-    yield 'exit', nframes
-
-def read_fifo(fifo):
-    #print 'thread', open(fifo, 'wb').write('hello')
-    open(fifo, 'wb').write('hello')
-
-def read_fifo2(fifo):
-    fp = open(fifo, 'wb')
-    #fp = os.open(fifo, os.O_WRONLY)
-    #print 'thread'
-    while True:
-        fp.write('.\n')
-        fp.flush()
-        time.sleep(1)
-
-if 0:
-    import threading
-
-    with fifo_handle('video.y4m') as fifo:
-        #print fifo
-        #t1 = threading.Thread(target=read_fifo, args=(fifo,))
-        #t1.start()
-        t1 = threading.Thread(target=read_fifo2, args=(fifo,))
-        t1.daemon = True
-        t1.start()
-        output_dispatcher(open(fifo, 'rb'))
-        asyncore.loop()
-
-        #print line
-        #print open(fifo, 'rb').read()
-        #fp = open(fifo, 'wb')
-        #fp.write('hello')
-        #fp.close()
-        #print fifo
-        #fp = os.open(fifo, os.O_RDONLY)
-        #os.close(fp)
-    return
-
-if 0:
-    tmp_dir = tempfile.mkdtemp()
-    fifo = os.path.join(tmp_dir, 'video.y4m')
-    os.mkfifo(fifo)
-    try:
-        process(fifo)
-    finally:
-        for name in os.listdir(tmp_dir):
-            os.unlink(os.path.join(tmp_dir, name))
-        os.rmdir(tmp_dir)
-
-
-def process(fifo):
-    import errno
-
-    input_dir = '/mnt/fuckup/projects/Einslive/schwerelos/media/edit_outputs/MASTER_FINAL/furs_kopierwerk/'
-    #out_fp = os.open(fifo, os.O_RDONLY)
-    #out_fp = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
-
-    outpipe = os.path.join(input_dir, 'pipe.ppm')
-    print outpipe
-    #out_fp = os.open(outpipe, os.O_WRONLY)
-    #open(outpipe, 'wb')
-
-    for name in os.listdir(input_dir + '110115_1LIVE_schwerelos_dpx'):
-        print name
-        #continue
-        fname = os.path.join(input_dir + '110115_1LIVE_schwerelos_dpx', name)
-        fp = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
-        p1 = subprocess.Popen(['convert', fname, '-set', 'colorspace', 'sRGB', '-colorspace', 'RGB', '-depth', '8', 'ppm:'+fifo])
-        while True:
-            try:
-                v = os.read(fp, 4096)
-                if not v:
-                    break
-            except OSError, e:
-                if e.errno == errno.EAGAIN:
-                    time.sleep(0.1)
-                    print 'again'
-                    continue
-                raise
-        p1.wait()
-        #out_fp.write(fp.read())
-        fp.close()
-        #out = os.path.join(input_dir + 'test2', name + '.jpg')
-    #out_fp.close()
-
- """
