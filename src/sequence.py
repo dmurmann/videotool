@@ -1,27 +1,7 @@
 
-import tempfile
-import contextlib
 import os
 import re
 import sys
-
-
-@contextlib.contextmanager
-def sequence_links(names):
-    tmp_dir = tempfile.mkdtemp()
-    links = []
-    for i, name in enumerate(names):
-        links.append(os.path.join(tmp_dir, '%08d%s' % (i, os.path.splitext(name)[1])))
-        os.symlink(os.path.abspath(name), links[-1])
-    try:
-        yield links[:]
-    finally:
-        for name in links:
-            try:
-                os.unlink(name)
-            except OSError:
-                pass
-        os.rmdir(tmp_dir)
 
 
 def sequences(names):

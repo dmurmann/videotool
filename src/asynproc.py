@@ -97,6 +97,38 @@ def fifo_handle(name):
         os.rmdir(tmp_dir)
 
 
+def end_process(process):
+    if getattr(process, 'terminate_children', False):
+        try:
+            pstree = process_tree()
+        except OSError:
+            pass
+        else:
+            for child_pid in pstree[process.pid]:
+                try:
+                    os.kill(child_pid, signal.SIGTERM)
+                except OSError as e:
+                    pass
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+    except OSError:
+        return
+    i = 1
+    try:
+        while process.poll() is None and i < 20:
+            # maximum sleep:  sum(i*i/100.0 for i in range(20)) = 24.7sec
+            time.sleep(i*i/100.0)
+            i += 1
+    finally:
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+
+
 @contextlib.contextmanager
 def run_process(*args, **kwds):
     """
@@ -105,7 +137,7 @@ def run_process(*args, **kwds):
 
     The process will be terminated on exit, and, if it is still
     running after a grace period, will be killed.  If the keyword
-    terminate_childen is True, the current process tree will be
+    terminate_children is True, the current process tree will be
     inspected and all child processes of the process will be
     terminated as well.
     """
@@ -114,43 +146,16 @@ def run_process(*args, **kwds):
         if pipe not in kwds:
             kwds[pipe] = subprocess.PIPE
     process = subprocess.Popen(*args, **kwds)
+    process.terminate_children = terminate_children
     try:
         yield process
     finally:
-        if terminate_children:
-            try:
-                pstree = process_tree()
-            except OSError:
-                pass
-            else:
-                for child_pid in pstree[process.pid]:
-                    try:
-                        os.kill(child_pid, signal.SIGTERM)
-                    except OSError as e:
-                        pass
-        if process.poll() is not None:
-            return
-        try:
-            process.terminate()
-        except OSError:
-            return
-        i = 1
-        try:
-            while process.poll() is None and i < 20:
-                # maximum sleep:  sum(i*i/100.0 for i in range(20)) = 24.7sec
-                time.sleep(i*i/100.0)
-                i += 1
-        finally:
-            if process.poll() is None:
-                try:
-                    process.kill()
-                except OSError:
-                    pass
+        end_process(process)
 
 
-class output_line_dispatcher(asyncore.file_dispatcher):
+class LineHandler(asyncore.file_dispatcher):
     """
-    An output_line_dispatcher reads from the given file object, and
+    An LineHandler reads from the given file object, and
     calls handle_line only after a complete line is recieved.
 
     This can be useful for handling line formatted output of
@@ -179,30 +184,49 @@ class output_line_dispatcher(asyncore.file_dispatcher):
         print >>sys.stderr, repr(line)
 
 
-class x264_handler(output_line_dispatcher):
-    format_desc = {
+class ProcessHandlerBase(LineHandler):
+    def __init__(self, process, read_handler, map=None, max_read_size=4096):
+        LineHandler.__init__(self, process.stdout, map=map, max_read_size=max_read_size)
+        self.process = process
+        self.read_handler = read_handler
+        self.dependants = []
+
+    def handle_line(self, line):
+        if self.read_handler is None:
+            return
+        for format, pattern in self.format_description.iteritems():
+            match = pattern.search(line)
+            if match is not None:
+                self.read_handler(format, match.groupdict())
+
+    def handle_close(self):
+        self.close()
+        if self.process.poll() is None:
+            end_process(self.process)
+        returncode = self.process.poll()
+        if returncode is None or returncode != 0:
+            for dependant in self.dependants:
+                end_process(dependant.process)
+
+
+def set_dependant(*handlers):
+    for i in xrange(len(handlers)):
+        handlers[i].dependants = handlers[:i] + handlers[i+1:]
+
+
+class X264Handler(ProcessHandlerBase):
+    format_description = {
         'status_long': re.compile(r'(?P<frame>\d+)/(?P<nframes>\d+) frames.*[^0-9.](?P<fps>\d*\.?\d*) fps'
                                    '.*[^0-9.](?P<bitrate>\d*\.?\d*) kb/s.*eta (?P<eta>\d+:\d+:\d+)'),
         'status_short': re.compile(r'(?P<frame>\d+) frames.*[^0-9.](?P<fps>\d*\.?\d*) fps'
                                     '.*[^0-9.](?P<bitrate>\d*\.?\d*) kb/s'),
         }
-    def handle_line(self, line):
-        for format, pattern in self.format_desc.iteritems():
-            match = pattern.search(line)
-            if match is not None:
-                sys.stdout.write(repr((format, match.groupdict()))+'\r')
-                sys.stdout.flush()
 
-class mplayer_handler(output_line_dispatcher):
-    format_desc = {
+
+class MplayerHandler(ProcessHandlerBase):
+    format_description = {
         'status': re.compile(r'V:\s*(?P<time>\d*\.\d*).*[^0-9](?P<frame>\d+)/[^0-9]*(?P<nframes>\d+)[^0-9]'),
         }
-    def handle_line(self, line):
-        for format, pattern in self.format_desc.iteritems():
-            match = pattern.search(line)
-            if match is not None:
-                #print format, match.groupdict()
-                pass
 
 
 def run_x264(input, output, **options):
@@ -248,17 +272,55 @@ def run_mplayer(input, output, **options):
     return run_process([which('mplayer'), input] + option_list, stderr=subprocess.STDOUT,
                        terminate_children=True)
 
+
+@contextlib.contextmanager
+def sequence_links(names):
+    tmp_dir = tempfile.mkdtemp()
+    links = []
+    for i, name in enumerate(names):
+        links.append(os.path.join(tmp_dir, '%08d%s' % (i, os.path.splitext(name)[1])))
+        os.symlink(os.path.abspath(name), links[-1])
+    try:
+        yield links[:]
+    finally:
+        for name in links:
+            try:
+                os.unlink(name)
+            except OSError:
+                pass
+        os.rmdir(tmp_dir)
+
+
+@contextlib.contextmanager
+def get_mplayer_input(input):
+    if isinstance(input, list):
+        with sequence_links(input) as links:
+            directory = os.path.dirname(links[0])
+            extension = os.path.splitext(links[0])[1]
+            yield 'mf://' + os.path.join(directory, '*' + extension)
+    else:
+        yield input
+
+
+def stderr_out(format, groups):
+    sys.stderr.write(repr((format, groups))+'\r')
+    sys.stderr.flush()
+
+
 def encode(input, output, x264_options=None, mplayer_options=None):
     if x264_options is None:
         x264_options = {}
     if mplayer_options is None:
         mplayer_options = {}
-    with fifo_handle('video.y4m') as named_pipe:
-        with run_x264(named_pipe, output, **x264_options) as x264:
-            with run_mplayer(input, named_pipe, **mplayer_options) as mplayer:
-                mplayer_handler(mplayer.stdout)
-                x264_handler(x264.stdout)
-                asyncore.loop()
+    with get_mplayer_input(input) as input:
+        with fifo_handle('video.y4m') as named_pipe:
+            with run_x264(named_pipe, output, **x264_options) as x264:
+                with run_mplayer(input, named_pipe, **mplayer_options) as mplayer:
+                    print >>sys.stderr, 'started encoding . . .'
+                    mplayer_handler = MplayerHandler(mplayer, None)
+                    x264_handler = X264Handler(x264, stderr_out)
+                    set_dependant(x264_handler, mplayer_handler)
+                    asyncore.loop()
     print
 
 
