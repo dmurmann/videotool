@@ -190,7 +190,8 @@ class x264_handler(output_line_dispatcher):
         for format, pattern in self.format_desc.iteritems():
             match = pattern.search(line)
             if match is not None:
-                print format, match.groupdict()
+                sys.stdout.write(repr((format, match.groupdict()))+'\r')
+                sys.stdout.flush()
 
 class mplayer_handler(output_line_dispatcher):
     format_desc = {
@@ -258,6 +259,7 @@ def encode(input, output, x264_options=None, mplayer_options=None):
                 mplayer_handler(mplayer.stdout)
                 x264_handler(x264.stdout)
                 asyncore.loop()
+    print
 
 
 def _main():
