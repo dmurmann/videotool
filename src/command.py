@@ -69,6 +69,10 @@ def _main():
     parser.add_option("--vf", dest="video_filters", help="video filters passed to decoding process")
     parser.add_option("--width", dest="width", help="resize video to match WIDTH")
     parser.add_option("--aspect", dest="aspect", help="set aspect ratio")
+    parser.add_option("--fps", dest="fps", help="set frames per second")
+    parser.add_option("--bitrate", dest="bitrate", help="controls the encoding rate (high|medium|low)")
+    parser.add_option("--tune", dest="tune", help="tune the encoding")
+    parser.add_option("--preset", dest="preset", help="encoding preset (speed/quality tradeoff)")
     options, args = parser.parse_args()
     if len(args) != 2:
         parser.error('one input and one output is required (-h for help)')
@@ -79,13 +83,27 @@ def _main():
     if not options.force and os.path.exists(output_name):
         parser.error('output "%s" already exists (force with -f)' % output_name)
 
+    x264_options = {}
     mplayer_options = {}
     if options.video_filters:
         mplayer_options['vf'] = options.video_filters
     if options.width and options.aspect:
         mplayer_options['vf'] = 'scale=%d:%d' % calculate_format(options.width, options.aspect)
+    if options.fps:
+        mplayer_options['r'] = options.fps
+    if options.bitrate:
+        try:
+            crf = int(options.bitrate)
+        except ValueError:
+            crf = dict(high=21, medium=23, low=25).get(options.bitrate, 23)
+        x264_options['crf'] = crf
+    if options.tune:
+        x264_options['tune'] = options.tune
+    if options.preset:
+        x264_options['preset'] = options.preset
 
-    asynproc.encode(get_input(input_name), output_name, mplayer_options=mplayer_options)
+    asynproc.encode(get_input(input_name), output_name, x264_options=x264_options,
+                    mplayer_options=mplayer_options)
 
 
 if __name__=='__main__':
