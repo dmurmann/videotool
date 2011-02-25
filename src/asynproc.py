@@ -67,7 +67,7 @@ def which(name):
 def process_tree():
     ps = subprocess.Popen([which('ps')] + '-o pid,ppid -ax'.split(),
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = ps.communicate()
+    stdout = ps.communicate()[0]
     result = collections.defaultdict(list)
     for line in stdout.split('\n'):
         if not line:
@@ -131,7 +131,7 @@ def end_process(process):
             for child_pid in pstree[process.pid]:
                 try:
                     os.kill(child_pid, signal.SIGTERM)
-                except OSError as e:
+                except OSError:
                     pass
     if process.poll() is not None:
         return
@@ -185,13 +185,16 @@ class LineHandler(asyncore.file_dispatcher):
 
 
 class ProcessHandlerBase(LineHandler):
-    def __init__(self, process, read_handler, map=None, max_read_size=4096):
+    def __init__(self, process, read_handler, error_handler, map=None, max_read_size=4096):
         LineHandler.__init__(self, process.stdout, map=map, max_read_size=max_read_size)
         self.process = process
         self.read_handler = read_handler
+        self.error_handler = error_handler
         self.dependants = []
+        self.output = []
 
     def handle_line(self, line):
+        self.output.append(line)
         if self.read_handler is None:
             return
         for format, pattern in self.format_description.iteritems():
@@ -202,9 +205,12 @@ class ProcessHandlerBase(LineHandler):
     def handle_close(self):
         self.close()
         if self.process.poll() is None:
+            print >>sys.stderr, 'process closed pipe before ending'
             end_process(self.process)
         returncode = self.process.poll()
         if returncode is None or returncode != 0:
+            if self.error_handler is not None:
+                self.error_handler(returncode, self.output)
             for dependant in self.dependants:
                 if dependant.process.poll() is None:
                     end_process(dependant.process)
@@ -303,9 +309,13 @@ def get_mplayer_input(input):
         yield input
 
 
-def stderr_out(format, groups):
+def status_out(format, groups):
     sys.stderr.write(repr((format, groups))+'\r')
     sys.stderr.flush()
+
+
+def error_out(returncode, output):
+    print >>sys.stderr, ''.join(output)
 
 
 def encode(input, output, x264_options=None, mplayer_options=None):
@@ -318,8 +328,8 @@ def encode(input, output, x264_options=None, mplayer_options=None):
             with run_x264(named_pipe, output, **x264_options) as x264:
                 with run_mplayer(input, named_pipe, **mplayer_options) as mplayer:
                     print >>sys.stderr, 'started encoding . . .'
-                    mplayer_handler = MplayerHandler(mplayer, None)
-                    x264_handler = X264Handler(x264, stderr_out)
+                    mplayer_handler = MplayerHandler(mplayer, None, error_out)
+                    x264_handler = X264Handler(x264, status_out, None)
                     set_dependant(x264_handler, mplayer_handler)
                     asyncore.loop()
     print

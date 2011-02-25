@@ -66,7 +66,7 @@ def _main():
     parser = optparse.OptionParser("usage: %prog [options] input output")
     parser.add_option("-f", "--force", dest="force", action="store_true",
                       default=False, help="overwrite existing output file")
-    parser.add_option("--vf", dest="video_filters", help="video filters passed to decoding processs")
+    parser.add_option("--vf", dest="video_filters", help="video filters passed to decoding process")
     options, args = parser.parse_args()
     if len(args) != 2:
         parser.error('one input and one output is required')
