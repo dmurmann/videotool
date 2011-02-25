@@ -97,6 +97,30 @@ def fifo_handle(name):
         os.rmdir(tmp_dir)
 
 
+@contextlib.contextmanager
+def run_process(*args, **kwds):
+    """
+    Creates a subprocess.Popen object with the given arguments,
+    but defaults to creating pipes for stdin, stdout and stderr.
+
+    The process will be terminated on exit, and, if it is still
+    running after a grace period, will be killed.  If the keyword
+    terminate_children is True, the current process tree will be
+    inspected and all child processes of the process will be
+    terminated as well.
+    """
+    terminate_children = kwds.pop('terminate_children', False)
+    for pipe in ('stdin', 'stdout', 'stderr'):
+        if pipe not in kwds:
+            kwds[pipe] = subprocess.PIPE
+    process = subprocess.Popen(*args, **kwds)
+    process.terminate_children = terminate_children
+    try:
+        yield process
+    finally:
+        end_process(process)
+
+
 def end_process(process):
     if getattr(process, 'terminate_children', False):
         try:
@@ -127,30 +151,6 @@ def end_process(process):
                 process.kill()
             except OSError:
                 pass
-
-
-@contextlib.contextmanager
-def run_process(*args, **kwds):
-    """
-    Creates a subprocess.Popen object with the given arguments,
-    but defaults to creating pipes for stdin, stdout and stderr.
-
-    The process will be terminated on exit, and, if it is still
-    running after a grace period, will be killed.  If the keyword
-    terminate_children is True, the current process tree will be
-    inspected and all child processes of the process will be
-    terminated as well.
-    """
-    terminate_children = kwds.pop('terminate_children', False)
-    for pipe in ('stdin', 'stdout', 'stderr'):
-        if pipe not in kwds:
-            kwds[pipe] = subprocess.PIPE
-    process = subprocess.Popen(*args, **kwds)
-    process.terminate_children = terminate_children
-    try:
-        yield process
-    finally:
-        end_process(process)
 
 
 class LineHandler(asyncore.file_dispatcher):
@@ -206,7 +206,8 @@ class ProcessHandlerBase(LineHandler):
         returncode = self.process.poll()
         if returncode is None or returncode != 0:
             for dependant in self.dependants:
-                end_process(dependant.process)
+                if dependant.process.poll() is None:
+                    end_process(dependant.process)
 
 
 def set_dependant(*handlers):
