@@ -65,7 +65,7 @@ def which(name):
 
 
 def process_tree():
-    ps = subprocess.Popen([which('ps')] + '-o pid,ppid -ax'.split(),
+    ps = subprocess.Popen([which('ps')] + 'ax -o pid,ppid'.split(),
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout = ps.communicate()[0]
     result = collections.defaultdict(list)
@@ -230,9 +230,16 @@ class X264Handler(ProcessHandlerBase):
         }
 
 
-class MplayerHandler(ProcessHandlerBase):
+class MPlayerHandler(ProcessHandlerBase):
     format_description = {
         'status': re.compile(r'V:\s*(?P<time>\d*\.\d*).*[^0-9](?P<frame>\d+)/[^0-9]*(?P<nframes>\d+)[^0-9]'),
+        }
+
+
+class FFmpegHandler(ProcessHandlerBase):
+    format_description = {
+        'all': re.compile(r'(?P<all>.*)'),
+        'status': re.compile(r'frame=[ ]*(?P<frame>[\d.]+).*fps=[ ]*(?P<fps>[\d.]+)'),
         }
 
 
@@ -280,6 +287,19 @@ def run_mplayer(input, output, **options):
                        terminate_children=True)
 
 
+def run_ffmpeg(input, output, **options):
+    for opt, val in [('f', 'yuv4mpegpipe'), ('pix_fmt', 'yuv420p'), ('y', True)]:
+        options.setdefault(opt, val)
+    option_list = []
+    for k, v in options.iteritems():
+        if v is True:
+            option_list.append('-'+k)
+        else:
+            option_list.append('-'+k)
+            option_list.append(str(v))
+    return run_process([which('ffmpeg'), '-i', input] + option_list + [output], stderr=subprocess.STDOUT)
+
+
 @contextlib.contextmanager
 def sequence_links(names):
     tmp_dir = tempfile.mkdtemp()
@@ -309,6 +329,17 @@ def get_mplayer_input(input):
         yield input
 
 
+@contextlib.contextmanager
+def get_ffmpeg_input(input):
+    if isinstance(input, list):
+        with sequence_links(input) as links:
+            directory = os.path.dirname(links[0])
+            extension = os.path.splitext(links[0])[1]
+            yield os.path.join(directory, '%08d' + extension)
+    else:
+        yield input
+
+
 def status_out(format, groups):
     sys.stderr.write(repr((format, groups))+'\r')
     sys.stderr.flush()
@@ -323,14 +354,18 @@ def encode(input, output, x264_options=None, mplayer_options=None):
         x264_options = {}
     if mplayer_options is None:
         mplayer_options = {}
-    with get_mplayer_input(input) as input:
+    #with get_mplayer_input(input) as input:
+    with get_ffmpeg_input(input) as input:
         with fifo_handle('video.y4m') as named_pipe:
             with run_x264(named_pipe, output, **x264_options) as x264:
-                with run_mplayer(input, named_pipe, **mplayer_options) as mplayer:
+                #with run_mplayer(input, named_pipe, **mplayer_options) as mplayer:
+                with run_ffmpeg(input, named_pipe, **mplayer_options) as ffmpeg:
                     print >>sys.stderr, 'started encoding . . .'
-                    mplayer_handler = MplayerHandler(mplayer, None, error_out)
+                    #mplayer_handler = MPlayerHandler(mplayer, None, error_out)
+                    ffmpeg_handler = FFmpegHandler(ffmpeg, None, error_out)
                     x264_handler = X264Handler(x264, status_out, None)
-                    set_dependant(x264_handler, mplayer_handler)
+                    #set_dependant(x264_handler, mplayer_handler)
+                    set_dependant(x264_handler, ffmpeg_handler)
                     asyncore.loop()
     print
 

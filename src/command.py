@@ -67,9 +67,11 @@ def _main():
     parser.add_option("-f", "--force", dest="force", action="store_true",
                       default=False, help="overwrite existing output file")
     parser.add_option("--vf", dest="video_filters", help="video filters passed to decoding process")
+    parser.add_option("--width", dest="width", help="resize video to match WIDTH")
+    parser.add_option("--aspect", dest="aspect", help="set aspect ratio")
     options, args = parser.parse_args()
     if len(args) != 2:
-        parser.error('one input and one output is required')
+        parser.error('one input and one output is required (-h for help)')
     input_name = args[0]
     output_name = args[1]
     if not os.path.exists(input_name):
@@ -80,6 +82,8 @@ def _main():
     mplayer_options = {}
     if options.video_filters:
         mplayer_options['vf'] = options.video_filters
+    if options.width and options.aspect:
+        mplayer_options['vf'] = 'scale=%d:%d' % calculate_format(options.width, options.aspect)
 
     asynproc.encode(get_input(input_name), output_name, mplayer_options=mplayer_options)
 
