@@ -6,6 +6,7 @@ import re
 import sys
 
 import asynproc
+import coding
 import sequence
 
 
@@ -102,8 +103,15 @@ def _main():
     if options.preset:
         x264_options['preset'] = options.preset
 
-    asynproc.encode(get_input(input_name), output_name, x264_options=x264_options,
-                    mplayer_options=mplayer_options)
+    h264_options = coding.OptionsBase()
+    def status(format, info):
+        sys.stdout.write(repr(info) + '\r')
+        sys.stdout.flush()
+    h264_options.status = status
+    h264_options.options = x264_options
+
+    coding.encode_h264(get_input(input_name), output_name, encode_options=h264_options)
+    print
 
 
 if __name__=='__main__':

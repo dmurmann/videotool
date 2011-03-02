@@ -5,13 +5,13 @@ import asyncore
 import collections
 import contextlib
 import os
-import re
 import signal
 import subprocess
 import sys
 import tempfile
 import time
 
+from asyncore import loop
 
 def separation(s, seps):
     """
@@ -110,9 +110,10 @@ def run_process(*args, **kwds):
     terminated as well.
     """
     terminate_children = kwds.pop('terminate_children', False)
-    for pipe in ('stdin', 'stdout', 'stderr'):
-        if pipe not in kwds:
-            kwds[pipe] = subprocess.PIPE
+    kwds.setdefault('stdin', subprocess.PIPE)
+    kwds.setdefault('stdout', subprocess.PIPE)
+    kwds.setdefault('stderr', subprocess.STDOUT)
+    #print 'running "%s"' % ' '.join(args[0])
     process = subprocess.Popen(*args, **kwds)
     process.terminate_children = terminate_children
     try:
@@ -221,162 +222,11 @@ def set_dependant(*handlers):
         handlers[i].dependants = handlers[:i] + handlers[i+1:]
 
 
-class X264Handler(ProcessHandlerBase):
-    format_description = {
-        'status_long': re.compile(r'(?P<frame>\d+)/(?P<nframes>\d+) frames.*[^0-9.](?P<fps>\d*\.?\d*) fps'
-                                   '.*[^0-9.](?P<bitrate>\d*\.?\d*) kb/s.*eta (?P<eta>\d+:\d+:\d+)'),
-        'status_short': re.compile(r'(?P<frame>\d+) frames.*[^0-9.](?P<fps>\d*\.?\d*) fps'
-                                    '.*[^0-9.](?P<bitrate>\d*\.?\d*) kb/s'),
-        }
-
-
-class MPlayerHandler(ProcessHandlerBase):
-    format_description = {
-        'status': re.compile(r'V:\s*(?P<time>\d*\.\d*).*[^0-9](?P<frame>\d+)/[^0-9]*(?P<nframes>\d+)[^0-9]'),
-        }
-
-
-class FFmpegHandler(ProcessHandlerBase):
-    format_description = {
-        'all': re.compile(r'(?P<all>.*)'),
-        'status': re.compile(r'frame=[ ]*(?P<frame>[\d.]+).*fps=[ ]*(?P<fps>[\d.]+)'),
-        }
-
-
-def run_x264(input, output, **options):
-    options.setdefault('preset', 'veryslow')
-    # The following defaults are for QuickTime compatibility
-    options.setdefault('profile', 'main')
-    options.setdefault('bframes', '2')
-    options.setdefault('ref', '8')
-    options.setdefault('partitions', 'p8x8,b8x8,i4x4,p4x4')
-
-    option_list = [('--'+k, str(v)) for k, v in options.iteritems()]
-    option_list = [opt for x in option_list for opt in x]
-
-    return run_process([which('x264'), '--output', output, input] +
-                       option_list, stderr=subprocess.STDOUT)
-
-
-def run_mplayer(input, output, **options):
-    for opt, val in [('vf', 'scale=:::0'), ('sound', False), ('benchmark', True),
-                     ('quiet', False), ('lavdopts', 'skiploopfilter=none:threads=1'),
-                     ('consolecontrols', False), ('noconfig', 'all'),
-                     ('vo', 'yuv4mpeg:file="%s"' % output)]:
-        options.setdefault(opt, val)
-    # Decode jpgs with the ijpg codec, to force conversion to rgb,
-    # which will then correctly convert to yuv.  The mplayer internal
-    # jpg decoder would write the full range yuv data to the output
-    # stream (instead of 16-235).
-    if input.endswith(('.jpg', '.jpeg')):
-        options.setdefault('vc', 'ijpg,')
-
-    option_list = []
-    for k, v in options.iteritems():
-        if v is True:
-            option_list.append('-'+k)
-        elif v is False:
-            option_list.append('-no'+k)
-        elif not v:
-            continue
-        else:
-            option_list.append('-'+k)
-            option_list.append(str(v))
-
-    return run_process([which('mplayer'), input] + option_list, stderr=subprocess.STDOUT,
-                       terminate_children=True)
-
-
-def run_ffmpeg(input, output, **options):
-    for opt, val in [('f', 'yuv4mpegpipe'), ('pix_fmt', 'yuv420p'), ('y', True)]:
-        options.setdefault(opt, val)
-    option_list = []
-    for k, v in options.iteritems():
-        if v is True:
-            option_list.append('-'+k)
-        else:
-            option_list.append('-'+k)
-            option_list.append(str(v))
-    return run_process([which('ffmpeg'), '-i', input] + option_list + [output], stderr=subprocess.STDOUT)
-
-
-@contextlib.contextmanager
-def sequence_links(names):
-    tmp_dir = tempfile.mkdtemp()
-    links = []
-    for i, name in enumerate(names):
-        links.append(os.path.join(tmp_dir, '%08d%s' % (i, os.path.splitext(name)[1])))
-        os.symlink(os.path.abspath(name), links[-1])
-    try:
-        yield links[:]
-    finally:
-        for name in links:
-            try:
-                os.unlink(name)
-            except OSError:
-                pass
-        os.rmdir(tmp_dir)
-
-
-@contextlib.contextmanager
-def get_mplayer_input(input):
-    if isinstance(input, list):
-        with sequence_links(input) as links:
-            directory = os.path.dirname(links[0])
-            extension = os.path.splitext(links[0])[1]
-            yield 'mf://' + os.path.join(directory, '*' + extension)
-    else:
-        yield input
-
-
-@contextlib.contextmanager
-def get_ffmpeg_input(input):
-    if isinstance(input, list):
-        with sequence_links(input) as links:
-            directory = os.path.dirname(links[0])
-            extension = os.path.splitext(links[0])[1]
-            yield os.path.join(directory, '%08d' + extension)
-    else:
-        yield input
-
-
-def status_out(format, groups):
-    sys.stderr.write(repr((format, groups))+'\r')
-    sys.stderr.flush()
-
-
-def error_out(returncode, output):
-    print >>sys.stderr, ''.join(output)
-
-
-def encode(input, output, x264_options=None, mplayer_options=None):
-    if x264_options is None:
-        x264_options = {}
-    if mplayer_options is None:
-        mplayer_options = {}
-    #with get_mplayer_input(input) as input:
-    with get_ffmpeg_input(input) as input:
-        with fifo_handle('video.y4m') as named_pipe:
-            with run_x264(named_pipe, output, **x264_options) as x264:
-                #with run_mplayer(input, named_pipe, **mplayer_options) as mplayer:
-                with run_ffmpeg(input, named_pipe, **mplayer_options) as ffmpeg:
-                    print >>sys.stderr, 'started encoding . . .'
-                    #mplayer_handler = MPlayerHandler(mplayer, None, error_out)
-                    ffmpeg_handler = FFmpegHandler(ffmpeg, None, error_out)
-                    x264_handler = X264Handler(x264, status_out, None)
-                    #set_dependant(x264_handler, mplayer_handler)
-                    set_dependant(x264_handler, ffmpeg_handler)
-                    asyncore.loop()
-    print
-
-
 def _main():
     import doctest
     doctest.testmod()
-    encode(sys.argv[1], sys.argv[2])
     return
 
 if __name__=='__main__':
     _main()
-    sys.exit(0)
 
