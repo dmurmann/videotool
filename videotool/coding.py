@@ -1,6 +1,7 @@
 
 import os
 import re
+import subprocess
 
 import sequence
 import asynproc
@@ -26,7 +27,6 @@ class MPlayerHandler(asynproc.ProcessHandlerBase):
 
 class FFmpegHandler(asynproc.ProcessHandlerBase):
     format_description = {
-        'all': re.compile(r'(?P<all>.*)'),
         'status': re.compile(r'frame=[ ]*(?P<frame>[\d.]+).*fps=[ ]*(?P<fps>[\d.]+)'),
         }
 
@@ -124,4 +124,38 @@ def encode_h264(input, output, decode_options=None, encode_options=None):
                                                   encode_options.error)
                     asynproc.set_dependant(decoder_handler, encoder_handler)
                     asynproc.loop()
+
+
+def probe(input):
+    result = {'streams': [], 'format': {}}
+    current = result['format']
+    with asynproc.run_process([which('ffprobe'), '-show_format', '-show_streams', input],
+                              stderr=subprocess.PIPE) as prober:
+        stdout, stderr = prober.communicate()
+        for line in stdout.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            if line == '[STREAM]':
+                result['streams'].append({})
+                current = result['streams'][-1]
+                continue
+            if line == '[FORMAT]':
+                current = result['format']
+                continue
+            if '=' not in line:
+                continue
+            head, sep, tail = line.partition('=')
+            current[head] = tail
+    result['streams'].sort(key=lambda x: int(x['index']))
+    return result
+
+
+def _main():
+    import sys
+    from pprint import pprint
+    pprint(probe(sys.argv[1]))
+
+if __name__=='__main__':
+    _main()
 
