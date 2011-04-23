@@ -22,9 +22,11 @@ def _main():
             parser.error('%s is not a directory!' % d)
 
     class DecodeOptions(coding.OptionsBase):
-        def status(self, format, info):
-            #print format, info
-            pass
+        def error(self, returncode, output):
+            print ''.join(output)
+        # def status(self, format, info):
+        #     print format, info
+    class EncodeOptions(coding.OptionsBase):
         def error(self, returncode, output):
             print ''.join(output)
 
@@ -32,12 +34,20 @@ def _main():
     decode_options.options = {}
     if options.fps:
         decode_options.options['r'] = options.fps
+    else:
+        decode_options.options['r'] = 24
+
+    encode_options = EncodeOptions()
+    encode_options.options = {}
+    encode_options.options['crf'] = 22
+    encode_options.options['keyint'] = 24
+    encode_options.options['preset'] = 'slower'
 
     sequences = sequence.sequences(os.listdir(input_dir))
     for (head, tail), names in sequences.iteritems():
         output_name = os.path.join(output_dir, os.path.splitext(head + 'X' + tail)[0] + '.mp4')
         names = list(sequence.iterate_sequence(input_dir, head, tail, names))
-        coding.encode_h264(names, output_name, decode_options=decode_options)
+        coding.encode_h264(names, output_name, decode_options=decode_options, encode_options=encode_options)
 
 if __name__=='__main__':
     _main()
