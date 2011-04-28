@@ -206,9 +206,10 @@ class ProcessHandlerBase(LineHandler):
     def handle_close(self):
         self.close()
         if self.process.poll() is None:
-            print >>sys.stderr, 'process closed pipe before ending'
-            end_process(self.process)
-        returncode = self.process.poll()
+            # hopefully the process will die soon
+            returncode = self.process.wait()
+        else:
+            returncode = self.process.poll()
         if returncode is None or returncode != 0:
             if self.error_handler is not None:
                 self.error_handler(returncode, self.output)

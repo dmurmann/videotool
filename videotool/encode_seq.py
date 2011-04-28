@@ -12,6 +12,8 @@ import sequence
 def _main():
     parser = optparse.OptionParser("usage: %prog [options] input-dir output-dir")
     parser.add_option("--fps", dest="fps", help="set frames per second")
+    parser.add_option("--yuv", dest="yuv", help="output raw yuv instead of encoding h264",
+                      action='store_true', default=False)
     options, args = parser.parse_args()
     if len(args) != 2:
         parser.error('one input and one output is required (-h for help)')
@@ -20,6 +22,8 @@ def _main():
     for d in (input_dir, output_dir):
         if not os.path.isdir(d):
             parser.error('%s is not a directory!' % d)
+
+    os.umask(2)
 
     class DecodeOptions(coding.OptionsBase):
         def error(self, returncode, output):
@@ -45,9 +49,13 @@ def _main():
 
     sequences = sequence.sequences(os.listdir(input_dir))
     for (head, tail), names in sequences.iteritems():
-        output_name = os.path.join(output_dir, os.path.splitext(head + 'X' + tail)[0] + '.mp4')
         names = list(sequence.iterate_sequence(input_dir, head, tail, names))
-        coding.encode_h264(names, output_name, decode_options=decode_options, encode_options=encode_options)
+        output_name = os.path.join(output_dir, os.path.splitext(head[:-1] + tail)[0])
+        if options.yuv:
+            coding.encode_yuv(names, output_name + '_yuv.mov', decode_options=decode_options)
+        else:
+            coding.encode_h264(names, output_name + '.mp4', decode_options=decode_options,
+                               encode_options=encode_options)
 
 if __name__=='__main__':
     _main()

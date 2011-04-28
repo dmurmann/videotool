@@ -126,6 +126,20 @@ def encode_h264(input, output, decode_options=None, encode_options=None):
                     asynproc.loop()
 
 
+def encode_yuv(input, output, decode_options=None):
+    if decode_options is None:
+        decode_options = OptionsBase()
+    decode_options.options = getattr(decode_options, 'options', {})
+    for opt, val in [('f', 'mov'), ('vcodec', 'rawvideo'), ('pix_fmt', 'uyvy422'), ('vtag', '2vuy'), ('y', True)]:
+        decode_options.options.setdefault(opt, val)
+    decoder_type = decode_options.options.get('type', 'ffmpeg')
+    with sequence_as_str_repr(input, decoder_type) as input:
+        with decode_to_yuv_ffmpeg(input, output, **decode_options.options) as decoder:
+            decoder_handler = FFmpegHandler(decoder, decode_options.status,
+                                            decode_options.error)
+            asynproc.loop()
+
+
 def probe(input):
     result = {'streams': [], 'format': {}}
     current = result['format']
